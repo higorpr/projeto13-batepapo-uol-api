@@ -4,6 +4,7 @@ import { MongoClient } from "mongodb";
 import dotenv from "dotenv";
 import dayjs from "dayjs";
 import "dayjs/locale/pt-br.js";
+import joi from "joi";
 
 //configs
 const app = express();
@@ -13,68 +14,111 @@ dotenv.config();
 
 const mongoClient = new MongoClient(process.env.MONGO_URI);
 let db;
-let users;
-let messages;
+let usersDB;
+let messagesDB;
+
+const participantSchema = joi.object({
+    name: joi.string().required(),
+});
 
 // Connecting to the mongoDB server
-mongoClient
-    .connect()
-    .then(() => {
-        db = mongoClient.db("chatDB");
-        users = db.collection("users");
-        messages = db.collection("messages");
-        // users.findOne({ name: "Higor" }).then((user) => console.log(user));
-        console.log("MongoDB server connected");
-    })
-    .catch((err) => {
-        console.log(err);
-    });
+try {
+    await mongoClient.connect();
+    db = mongoClient.db("chatDB");
+    usersDB = db.collection("users");
+    messagesDB = db.collection("messages");
+    console.log("MongoDB server connected");
+} catch (err) {
+    console.log(err);
+}
 
 // Routes
-app.post("/participants", (req, res) => {
+app.post("/participants", async (req, res) => {
     const { name } = req.body;
-    // Check if name was sent
-    if (!name) {
+
+    const validError = participantSchema.validate(name, { abortEarly: false });
+
+    if (validError) {
         res.status(422).send("Por favor, insira um nome.");
         return;
     }
 
     // Check if user is already registered
-    users
-        .findOne({ name: name })
-        .then((u) => {
-            if (!u) {
-                const user = { name, lastStatus: Date.now() };
-                const message = {
-                    from: name,
-                    to: "Todos",
-                    text: "entra na sala...",
-                    type: "stauts",
-                    time: dayjs().format("hh:mm:ss"),
-                };
-                users.insertOne(user);
-                messages.insertOne(message);
-                res.sendStatus(201);
-            } else {
-                res.status(409).send('Este usuário já está cadastrado')
-            }
-        })
-        .catch((err) => {
-            console.log(err);
-        });
+    try {
+        const checkUser = await usersDB.findOne({ name: name });
+        if (!checkUser) {
+            const user = { name, lastStatus: Date.now() };
+            const message = {
+                from: name,
+                to: "Todos",
+                text: "entra na sala...",
+                type: "stauts",
+                time: dayjs().format("hh:mm:ss"),
+            };
+            usersDB.insertOne(user);
+            messagesDB.insertOne(message);
+            res.status(201).send("O usuário foi registrado com sucesso.");
+        } else {
+            res.status(409).send("Este usuário já está cadastrado.");
+        }
+    } catch (err) {
+        console.log(err);
+    }
 });
 
-app.get('/participants', (req,res) => {
-    users.find().toArray().then((users) => {
-        const allUsers = [];
-        users.forEach((user) => {
-            allUsers.push({name: user.name, lastStatus:user.lastStatus})
-        })
-        allUsers.reverse()
-        res.status(200).send(allUsers)
-    })
-    
-})
+app.get("/participants", async (req, res) => {
+    try {
+        const usersArr = await usersDB.find().toArray();
+        res.status(200).send(usersArr.reverse());
+    } catch (err) {
+        console.log(err);
+    }
+});
+
+app.post("/messages", async (req, res) => {
+    const allUsers = await usersDB.find().toArray();
+    const usersArray = allUsers.map((u) => u.name);
+    const messageSchema = joi.object({
+        to: joi.string().required(),
+        text: joi.string().required(),
+        type: joi.string().valid("message", "private_message").required(),
+        user: joi.string().valid(...usersArray),
+    });
+    const { to, text, type } = req.body;
+    const { user } = req.headers;
+
+    const messageCheck = { user, to, text, type };
+    console.log(messageCheck)
+
+    const validError = messageSchema.validate(messageCheck, {abortEarly:false})
+
+    if (validError.error) {
+        const errors = validError.error.details.map(e => e.message)
+        res.status(422).send(errors)
+        return
+    }
+    res.status(200).send(messageCheck);
+});
+
+app.get("/messages", async (req, res) => {
+    const { limit } = req.query;
+    const { User } = req.headers;
+    try {
+        const allMsg = await messagesDB
+            .find({ $or: [{ from: User }, { to: User }, { to: "Todos" }] })
+            .toArray();
+        console.log(allMsg);
+        const orderedMsg = [...allMsg].reverse();
+        if (!limit) {
+            res.status(200).send(orderedMsg);
+        } else {
+            const msgs = orderedMsg.slice(0, limit);
+            res.status(200).send(msgs);
+        }
+    } catch (err) {
+        console.log(err);
+    }
+});
 
 const port = 5000;
 app.listen(port, () => console.log(`Backend app running on port ${port}.`));
