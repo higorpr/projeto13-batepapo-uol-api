@@ -52,7 +52,7 @@ app.post("/participants", async (req, res) => {
                 from: name,
                 to: "Todos",
                 text: "entra na sala...",
-                type: "stauts",
+                type: "status",
                 time: dayjs().format("hh:mm:ss"),
             };
             usersDB.insertOne(user);
@@ -76,36 +76,59 @@ app.get("/participants", async (req, res) => {
 });
 
 app.post("/messages", async (req, res) => {
-    const allUsers = await usersDB.find().toArray();
-    const usersArray = allUsers.map((u) => u.name);
-    const messageSchema = joi.object({
-        to: joi.string().required(),
-        text: joi.string().required(),
-        type: joi.string().valid("message", "private_message").required(),
-        user: joi.string().valid(...usersArray),
-    });
     const { to, text, type } = req.body;
     const { user } = req.headers;
+    // Validation block
+    try {
+        const allUsers = await usersDB.find().toArray();
+        const usersArray = allUsers.map((u) => u.name);
+        const messageSchema = joi.object({
+            to: joi.string().required(),
+            text: joi.string().required(),
+            type: joi.string().valid("message", "private_message").required(),
+            user: joi.string().valid(...usersArray),
+        });
 
-    const messageCheck = { user, to, text, type };
-    console.log(messageCheck)
+        const messageCheck = { user, to, text, type };
 
-    const validError = messageSchema.validate(messageCheck, {abortEarly:false})
+        const validError = messageSchema.validate(messageCheck, {
+            abortEarly: false,
+        });
 
-    if (validError.error) {
-        const errors = validError.error.details.map(e => e.message)
-        res.status(422).send(errors)
-        return
+        if (validError.error) {
+            const errors = validError.error.details.map((e) => e.message);
+            res.status(422).send(errors);
+            return;
+        }
+    } catch (err) {
+        res.status(500).send("Não foi possivel recuperar os usuários logados.");
+        return;
     }
-    res.status(200).send(messageCheck);
+
+    const message = {
+        from: user,
+        to,
+        text,
+        type,
+        time: dayjs().format("hh:mm:ss"),
+    };
+
+    try {
+        await messagesDB.insertOne(message);
+        res.status(201).send('Mensagem salva!')
+    } catch (err) {
+        res.status(500).send('Não foi possível salvar a mensagem.')
+    }
+
+    
 });
 
 app.get("/messages", async (req, res) => {
     const { limit } = req.query;
-    const { User } = req.headers;
+    const { user } = req.headers;
     try {
         const allMsg = await messagesDB
-            .find({ $or: [{ from: User }, { to: User }, { to: "Todos" }] })
+            .find({ $or: [{ from: user }, { to: user }, { to: "Todos" }] })
             .toArray();
         console.log(allMsg);
         const orderedMsg = [...allMsg].reverse();
