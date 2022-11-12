@@ -32,14 +32,66 @@ try {
     console.log(err);
 }
 
+// Functions
+async function dropUser() {
+    let userArray;
+    const limit = 10000;
+
+    // Getting all connected users
+    try {
+        userArray = await usersDB.find().toArray();
+    } catch (err) {
+        console.log("An error occurred: ", err);
+        return;
+    }
+
+    // Deleting users that are inactive
+    try {
+        userArray.forEach(async (u) => {
+            const delUser = await usersDB.deleteOne({
+                lastStatus: { $lt: Date.now() - limit },
+            });
+            console.log(delUser);
+
+            const message = {
+                from: u.name,
+                to: "Todos",
+                text: "Sai da sala...",
+                type: "message",
+                time: dayjs().format("hh:mm:ss"),
+            };
+            const updMessages = await messagesDB.insertOne(message);
+            console.log(updMessages)
+        });
+    } catch (err) {
+        console.log(err);
+    }
+    // try {
+    //     const delRes = await usersDB.deleteMany({
+    //         lastStatus: { $lt: Date.now() - limit },
+    //     });
+    //     console.log(delRes);
+    // } catch (err) {
+    //     console.log(err);
+    //     return;
+    // }
+}
+
+// Initializations
+setInterval(dropUser, 15000);
+
 // Routes
 app.post("/participants", async (req, res) => {
     const { name } = req.body;
 
-    const validError = participantSchema.validate(name, { abortEarly: false });
+    const validError = participantSchema.validate(
+        { name },
+        { abortEarly: false }
+    ).error;
 
     if (validError) {
-        res.status(422).send("Por favor, insira um nome.");
+        const errors = validError.details.map((e) => e.message);
+        res.status(422).send(errors);
         return;
     }
 
@@ -115,12 +167,10 @@ app.post("/messages", async (req, res) => {
 
     try {
         await messagesDB.insertOne(message);
-        res.status(201).send('Mensagem salva!')
+        res.status(201).send("Mensagem salva!");
     } catch (err) {
-        res.status(500).send('Não foi possível salvar a mensagem.')
+        res.status(500).send("Não foi possível salvar a mensagem.");
     }
-
-    
 });
 
 app.get("/messages", async (req, res) => {
@@ -130,7 +180,6 @@ app.get("/messages", async (req, res) => {
         const allMsg = await messagesDB
             .find({ $or: [{ from: user }, { to: user }, { to: "Todos" }] })
             .toArray();
-        console.log(allMsg);
         const orderedMsg = [...allMsg].reverse();
         if (!limit) {
             res.status(200).send(orderedMsg);
@@ -140,6 +189,44 @@ app.get("/messages", async (req, res) => {
         }
     } catch (err) {
         console.log(err);
+    }
+});
+
+app.post("/status", async (req, res) => {
+    const { user } = req.headers;
+
+    // User validation
+    try {
+        const allUsers = await usersDB.find().toArray();
+        const userArray = allUsers.map((u) => u.name);
+        const userSchema = joi.object({
+            user: joi
+                .string()
+                .valid(...userArray)
+                .required(),
+        });
+
+        const errors = userSchema.validate(
+            { user },
+            { abortEarly: false }
+        ).error;
+
+        if (errors) {
+            res.sendStatus(404);
+            return;
+        }
+    } catch (err) {
+        console.log(err);
+        res.sendStatus(500);
+    }
+
+    try {
+        const updatedUser = { name: user, lastStatus: Date.now() };
+        await usersDB.updateOne({ name: user }, { $set: updatedUser });
+        res.sendStatus(200);
+    } catch (err) {
+        console.log(err);
+        res.sendStatus(500);
     }
 });
 
