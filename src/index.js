@@ -1,6 +1,6 @@
 import express, { json } from "express";
 import cors from "cors";
-import { MongoClient } from "mongodb";
+import { MongoClient, ObjectId } from "mongodb";
 import dotenv from "dotenv";
 import dayjs from "dayjs";
 import "dayjs/locale/pt-br.js";
@@ -53,9 +53,6 @@ async function dropUser() {
                 await usersDB.deleteOne({
                     name: u.name,
                 });
-                console.log(
-                    `${u.name} saiu da sala as ${dayjs().format("hh:mm:ss")}`
-                );
 
                 const message = {
                     from: u.name,
@@ -65,25 +62,11 @@ async function dropUser() {
                     time: dayjs().format("hh:mm:ss"),
                 };
                 await messagesDB.insertOne(message);
-                console.log(
-                    `${u.name} digitou que saiu da sala as ${dayjs().format(
-                        "hh:mm:ss"
-                    )}`
-                );
             }
         });
     } catch (err) {
         console.log(err);
     }
-    // try {
-    //     const delRes = await usersDB.deleteMany({
-    //         lastStatus: { $lt: Date.now() - limit },
-    //     });
-    //     console.log(delRes);
-    // } catch (err) {
-    //     console.log(err);
-    //     return;
-    // }
 }
 
 // Initializations
@@ -139,7 +122,6 @@ app.get("/participants", async (req, res) => {
 app.post("/messages", async (req, res) => {
     const { to, text, type } = req.body;
     const { user } = req.headers;
-    console.log(req.headers)
     // Validation block
     try {
         const allUsers = await usersDB.find().toArray();
@@ -166,7 +148,6 @@ app.post("/messages", async (req, res) => {
         res.status(500).send("Não foi possivel recuperar os usuários logados.");
         return;
     }
-    console.log(user)
     const message = {
         from: user,
         to,
@@ -177,7 +158,6 @@ app.post("/messages", async (req, res) => {
 
     try {
         await messagesDB.insertOne(message);
-        console.log(message)
         res.status(201).send("Mensagem salva!");
     } catch (err) {
         res.status(500).send("Não foi possível salvar a mensagem.");
@@ -187,7 +167,6 @@ app.post("/messages", async (req, res) => {
 app.get("/messages", async (req, res) => {
     const { limit } = req.query;
     const { user } = req.headers;
-    console.log(user)
     try {
         const allMsg = await messagesDB
             .find({ $or: [{ from: user }, { to: user }, { to: "Todos" }] })
@@ -239,6 +218,27 @@ app.post("/status", async (req, res) => {
     } catch (err) {
         console.log(err);
         res.sendStatus(500);
+    }
+});
+
+app.delete("/messages/:id", async (req, res) => {
+    const { id } = req.params;
+    const { user } = req.headers;
+
+    try {
+        const msg = await messagesDB.findOne({ _id: ObjectId(id) });
+        if (msg.from !== user) {
+            res.status(401).send("Você não pode deletar esta mensagem.");
+            return;
+        }
+
+        if (msg) {
+            await messagesDB.deleteOne({ _id: ObjectId(id) });
+            res.sendStatus(200)
+        }
+    } catch (err) {
+        console.log(err);
+        res.sendStatus(404);
     }
 });
 
