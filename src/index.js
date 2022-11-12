@@ -40,6 +40,7 @@ async function dropUser() {
     // Getting all connected users
     try {
         userArray = await usersDB.find().toArray();
+        console.log(userArray);
     } catch (err) {
         console.log("An error occurred: ", err);
         return;
@@ -48,20 +49,28 @@ async function dropUser() {
     // Deleting users that are inactive
     try {
         userArray.forEach(async (u) => {
-            const delUser = await usersDB.deleteOne({
-                lastStatus: { $lt: Date.now() - limit },
-            });
-            console.log(delUser);
+            if (Date.now() - u.lastStatus > limit) {
+                await usersDB.deleteOne({
+                    name: u.name,
+                });
+                console.log(
+                    `${u.name} saiu da sala as ${dayjs().format("hh:mm:ss")}`
+                );
 
-            const message = {
-                from: u.name,
-                to: "Todos",
-                text: "Sai da sala...",
-                type: "message",
-                time: dayjs().format("hh:mm:ss"),
-            };
-            const updMessages = await messagesDB.insertOne(message);
-            console.log(updMessages)
+                const message = {
+                    from: u.name,
+                    to: "Todos",
+                    text: "Sai da sala...",
+                    type: "message",
+                    time: dayjs().format("hh:mm:ss"),
+                };
+                await messagesDB.insertOne(message);
+                console.log(
+                    `${u.name} digitou que saiu da sala as ${dayjs().format(
+                        "hh:mm:ss"
+                    )}`
+                );
+            }
         });
     } catch (err) {
         console.log(err);
@@ -130,6 +139,7 @@ app.get("/participants", async (req, res) => {
 app.post("/messages", async (req, res) => {
     const { to, text, type } = req.body;
     const { user } = req.headers;
+    console.log(req.headers)
     // Validation block
     try {
         const allUsers = await usersDB.find().toArray();
@@ -156,7 +166,7 @@ app.post("/messages", async (req, res) => {
         res.status(500).send("Não foi possivel recuperar os usuários logados.");
         return;
     }
-
+    console.log(user)
     const message = {
         from: user,
         to,
@@ -167,6 +177,7 @@ app.post("/messages", async (req, res) => {
 
     try {
         await messagesDB.insertOne(message);
+        console.log(message)
         res.status(201).send("Mensagem salva!");
     } catch (err) {
         res.status(500).send("Não foi possível salvar a mensagem.");
@@ -176,15 +187,16 @@ app.post("/messages", async (req, res) => {
 app.get("/messages", async (req, res) => {
     const { limit } = req.query;
     const { user } = req.headers;
+    console.log(user)
     try {
         const allMsg = await messagesDB
             .find({ $or: [{ from: user }, { to: user }, { to: "Todos" }] })
             .toArray();
-        const orderedMsg = [...allMsg].reverse();
+
         if (!limit) {
-            res.status(200).send(orderedMsg);
+            res.status(200).send(allMsg);
         } else {
-            const msgs = orderedMsg.slice(0, limit);
+            const msgs = allMsg.slice(0, limit);
             res.status(200).send(msgs);
         }
     } catch (err) {
