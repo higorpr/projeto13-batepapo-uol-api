@@ -40,7 +40,6 @@ async function dropUser() {
     // Getting all connected users
     try {
         userArray = await usersDB.find().toArray();
-        console.log(userArray);
     } catch (err) {
         console.log("An error occurred: ", err);
         return;
@@ -175,7 +174,7 @@ app.get("/messages", async (req, res) => {
         if (!limit) {
             res.status(200).send(allMsg);
         } else {
-            const msgs = allMsg.slice(0, limit);
+            const msgs = allMsg.slice(-limit);
             res.status(200).send(msgs);
         }
     } catch (err) {
@@ -234,7 +233,58 @@ app.delete("/messages/:id", async (req, res) => {
 
         if (msg) {
             await messagesDB.deleteOne({ _id: ObjectId(id) });
-            res.sendStatus(200)
+            res.sendStatus(200);
+        }
+    } catch (err) {
+        console.log(err);
+        res.sendStatus(404);
+    }
+});
+
+app.put("/messages/:id", async (req, res) => {
+    const { id } = req.params;
+    const { to, text, type } = req.body;
+    const { user } = req.headers;
+
+    try {
+        const allUsers = await usersDB.find().toArray();
+        const usersArray = allUsers.map((u) => u.name);
+        const messageSchema = joi.object({
+            to: joi.string().required(),
+            text: joi.string().required(),
+            type: joi.string().valid("message", "private_message").required(),
+            user: joi.string().valid(...usersArray),
+        });
+
+        const messageCheck = { user, to, text, type };
+
+        const validError = messageSchema.validate(messageCheck, {
+            abortEarly: false,
+        });
+
+        if (validError.error) {
+            const errors = validError.error.details.map((e) => e.message);
+            res.status(422).send(errors);
+            return;
+        }
+    } catch (err) {
+        res.status(500).send("Não foi possivel recuperar os usuários logados.");
+        return;
+    }
+
+    try {
+        const msg = await messagesDB.findOne({ _id: ObjectId(id) });
+        if (msg.from !== user) {
+            res.status(401).send("Você não pode alterar esta mensagem.");
+            return;
+        }
+
+        if (msg) {
+            await messagesDB.updateOne(
+                { _id: ObjectId(id) },
+                { $set: req.body }
+            );
+            res.sendStatus(200);
         }
     } catch (err) {
         console.log(err);
