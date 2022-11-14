@@ -5,13 +5,15 @@ import dotenv from "dotenv";
 import dayjs from "dayjs";
 import "dayjs/locale/pt-br.js";
 import joi from "joi";
+import { stripHtml } from "string-strip-html";
 
-//configs
+//configs 
 const app = express();
 app.use(cors());
 app.use(json());
 dotenv.config();
 
+// global variables & constants
 const mongoClient = new MongoClient(process.env.MONGO_URI);
 let db;
 let usersDB;
@@ -21,7 +23,7 @@ const participantSchema = joi.object({
     name: joi.string().required(),
 });
 
-// Connecting to the mongoDB server
+// Connect to the mongoDB server
 try {
     await mongoClient.connect();
     db = mongoClient.db("chatDB");
@@ -37,7 +39,7 @@ async function dropUser() {
     let userArray;
     const limit = 10000;
 
-    // Getting all connected users
+    // Gets all connected users
     try {
         userArray = await usersDB.find().toArray();
     } catch (err) {
@@ -45,7 +47,7 @@ async function dropUser() {
         return;
     }
 
-    // Deleting users that are inactive
+    // Deletes users that are inactive
     try {
         userArray.forEach(async (u) => {
             if (Date.now() - u.lastStatus > limit) {
@@ -73,7 +75,10 @@ setInterval(dropUser, 15000);
 
 // Routes
 app.post("/participants", async (req, res) => {
-    const { name } = req.body;
+    let { name } = req.body;
+    if (name) {
+        name = stripHtml(name).result.trim();
+    }
 
     const validError = participantSchema.validate(
         { name },
@@ -86,7 +91,7 @@ app.post("/participants", async (req, res) => {
         return;
     }
 
-    // Check if user is already registered
+    // Checks if user is already registered
     try {
         const checkUser = await usersDB.findOne({ name: name });
         if (!checkUser) {
@@ -119,8 +124,14 @@ app.get("/participants", async (req, res) => {
 });
 
 app.post("/messages", async (req, res) => {
-    const { to, text, type } = req.body;
+    let { to, text, type } = req.body;
     const { user } = req.headers;
+    if (to && text && type) {
+        to = stripHtml(to).result.trim();
+        text = stripHtml(text).result.trim();
+        type = stripHtml(type).result.trim();
+    }
+
     // Validation block
     try {
         const allUsers = await usersDB.find().toArray();
